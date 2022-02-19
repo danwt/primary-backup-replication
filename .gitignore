@@ -118,3 +118,9 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# Apalache
+_apalache-out/
+
+# TLC extras
+states/
