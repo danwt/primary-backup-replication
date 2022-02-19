@@ -1,7 +1,7 @@
 ---- MODULE spec ----
 
-\* EXTENDS  Integers, FiniteSets, Sequences, TLC, Apalache, typedefs
-EXTENDS  Integers, Naturals, FiniteSets, Sequences, TLC, tlcFolds
+\* EXTENDS  Integers, FiniteSets, Sequences, TLC, Apalache
+EXTENDS  Integers, Naturals, FiniteSets, Sequences, TLC
 
 (*
 
@@ -32,6 +32,9 @@ response(guid, value) == [nature |-> _response,   guid |-> guid,    value |-> va
 updateHist(value) ==     [nature |-> _updateHist, guid |-> NullInt, value |-> value]
 
 VARIABLES
+(*Meta*)
+    \* @type: Str;
+    action,
 (*Global*)
     \* @type: Int;
     nextGUID,
@@ -54,6 +57,7 @@ SERVERS == 1..3
 CLIENT == 0
 
 Init == 
+    /\ action = "init"
     /\ nextGUID = 0
     /\ crashed = [p \in SERVERS |-> FALSE]
     /\ fifo = [p \in ((SERVERS \cup {CLIENT}) \X (SERVERS \cup {CLIENT})) |-> <<>>]
@@ -120,8 +124,6 @@ ReceiveSync ==
                 ![p, primary] = 
                     CASE primary \in servers[p] -> @ \o <<response(m.guid, m.value)>>
                       [] OTHER                  -> @
-                    
-
             ]
         /\ servers' = [servers EXCEPT ![p] = {e \in @ : primary <= e} ]
         /\ UNCHANGED responses
@@ -140,12 +142,14 @@ PrimaryBeginUpdate ==
         /\ m.nature = _updateHist
         /\ nextGUID' = nextGUID + 1
         /\ UNCHANGED crashed
-        /\ fifo' = LET
+        /\ fifo' =
+            LET
             v == IF value[p] = NullInt THEN m.value ELSE value[p]
             IN
             [
                 pair \in ({p} \X (servers[p] \ {p})) |-> fifo[pair] \o <<sync(nextGUID, v)>>
-            ] @@ fifo
+            ] @@ 
+            [fifo EXCEPT ![CLIENT, p] = Tail(@)]
         /\ servers' = [servers EXCEPT ![p] = {e \in @ : p <= e}]
         /\ UNCHANGED responses
         /\ UNCHANGED value
@@ -155,7 +159,7 @@ PrimaryCompleteUpdate ==
     \E p \in SERVERS:
     \E r \in responses[p]:
     /\ ~crashed[p]
-    /\ \A other \in servers[p] : (\E r_ \in responses[p] : r_.src = other /\ r_.m.guid = r.m.guid)
+    /\ \A other \in (servers[p] \ p) : (\E r_ \in responses[p] : r_.src = other /\ r_.m.guid = r.m.guid)
     /\ UNCHANGED nextGUID
     /\ UNCHANGED crashed
     /\ fifo' = [fifo EXCEPT ![p, CLIENT] = @ \o <<response(r.m.guid, r.m.value)>>]
@@ -165,8 +169,9 @@ PrimaryCompleteUpdate ==
     /\ UNCHANGED clientPrimary
 
 ClientSend == 
-    \E v \in 1..2:
-    /\ LET primary == CHOOSE e \in servers[CLIENT] : (\A x \in servers[CLIENT] : e <= x) IN
+    /\ clientPrimary = NullInt
+    /\ \E v \in 1..2:
+        LET primary == CHOOSE e \in servers[CLIENT] : (\A x \in servers[CLIENT] : e <= x) IN
         /\ UNCHANGED nextGUID
         /\ UNCHANGED crashed
         /\ fifo' = [fifo EXCEPT ![CLIENT, primary] = @ \o <<updateHist(v)>>]
@@ -197,26 +202,46 @@ ClientSucceed ==
     /\ clientPrimary' = 777
 
 Next ==
-    \/ Fail
-    \/ NotifyFail
-    \/ ReceiveResponse
-    \/ ReceiveSync
-    \/ PrimaryBeginUpdate
-    \/ PrimaryCompleteUpdate
-    \/ ClientSend
-    \/ ClientGiveup
-    \/ ClientSucceed
+    \/ /\ Fail
+       /\ action' = "fail"
+    \/ /\ NotifyFail
+       /\ action' = "notifyFail"
+    \/ /\ ReceiveResponse
+       /\ action' = "receiveResponse"
+    \/ /\ ReceiveSync
+       /\ action' = "receiveSync"
+    \/ /\ PrimaryBeginUpdate
+       /\ action' = "primaryBeginUpdate"
+    \/ /\ PrimaryCompleteUpdate
+       /\ action' = "primaryCompleteUpdate"
+    \/ /\ ClientSend
+       /\ action' = "clientSend"
+    \/ /\ ClientGiveup
+       /\ action' = "clientGiveup"
+    \/ /\ ClientSucceed
+       /\ action' = "clientSucceed"
 
 
-Sanity0 == clientPrimary # 777
-Sanity1 == value[1] # 1
+Sanity0  == clientPrimary # 777
+Sanity1  == value[1] # 1
+Sanity2  == clientPrimary = NullInt
+Sanity4  == action # "fail"
+Sanity5  == action # "notifyFail"
+Sanity6  == action # "receiveResponse"
+Sanity7  == action # "receiveSync"
+Sanity8  == action # "primaryBeginUpdate"
+Sanity9  == action # "primaryCompleteUpdate"
+Sanity10 == action # "clientSend"
+Sanity11 == action # "clientGiveup"
+Sanity12 == action # "clientSucceed"
 
-Validity ==
-    clientPrimary = 777 => 
-    \/ (\A p \in SERVERS \cup {CLIENT} : value[p] = 1)
-    \/ (\A p \in SERVERS \cup {CLIENT} : value[p] = 2)
+Agreement ==
+    clientPrimary = 777 => (
+        \/ (\A p \in SERVERS \cup {CLIENT} : value[p] = 1)
+        \/ (\A p \in SERVERS \cup {CLIENT} : value[p] = 2)
+    )
 
-Inv == Sanity0
+Inv == Agreement
 
 
 
