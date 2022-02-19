@@ -27,6 +27,8 @@ _sync == "sync"
 _response == "response"
 _updateHist == "updateHist"
 
+TargetValue == 42
+
 sync(guid, value) ==     [nature |-> _sync,       guid |-> guid,    value |-> value]
 response(guid, value) == [nature |-> _response,   guid |-> guid,    value |-> value]
 updateHist(value) ==     [nature |-> _updateHist, guid |-> NullInt, value |-> value]
@@ -151,7 +153,8 @@ PrimaryBeginUpdate ==
             ] @@ 
             [fifo EXCEPT ![CLIENT, p] = Tail(@)]
         /\ servers' = [servers EXCEPT ![p] = {e \in @ : p <= e}]
-        /\ UNCHANGED responses
+        (*Add own response (optimisation)*)
+        /\ responses' = [responses EXCEPT ![p] = @ \cup {[m|->m, src|->p]}]
         /\ UNCHANGED value
         /\ UNCHANGED clientPrimary
 
@@ -159,29 +162,30 @@ PrimaryCompleteUpdate ==
     \E p \in SERVERS:
     \E r \in responses[p]:
     /\ ~crashed[p]
-    /\ \A other \in (servers[p] \ p) : (\E r_ \in responses[p] : r_.src = other /\ r_.m.guid = r.m.guid)
+    /\ \A other \in servers[p] : (\E r_ \in responses[p] : r_.src = other /\ r_.m.guid = r.m.guid)
     /\ UNCHANGED nextGUID
     /\ UNCHANGED crashed
     /\ fifo' = [fifo EXCEPT ![p, CLIENT] = @ \o <<response(r.m.guid, r.m.value)>>]
     /\ UNCHANGED servers
-    /\ responses' = [responses EXCEPT ![p] = @ - {e \in @ : e.m.guid = r.m.guid}]
+    /\ responses' = [responses EXCEPT ![p] = @ \ {e \in @ : e.m.guid = r.m.guid}]
     /\ value' = [value EXCEPT ![p] = r.m.value]
     /\ UNCHANGED clientPrimary
 
 ClientSend == 
+    LET primary == CHOOSE e \in servers[CLIENT] : (\A x \in servers[CLIENT] : e <= x) IN
     /\ clientPrimary = NullInt
-    /\ \E v \in 1..2:
-        LET primary == CHOOSE e \in servers[CLIENT] : (\A x \in servers[CLIENT] : e <= x) IN
-        /\ UNCHANGED nextGUID
-        /\ UNCHANGED crashed
-        /\ fifo' = [fifo EXCEPT ![CLIENT, primary] = @ \o <<updateHist(v)>>]
-        /\ UNCHANGED servers
-        /\ UNCHANGED responses
-        /\ UNCHANGED value
-        /\ clientPrimary' = primary
+    /\ UNCHANGED nextGUID
+    /\ UNCHANGED crashed
+    /\ fifo' = [fifo EXCEPT ![CLIENT, primary] = @ \o <<updateHist(TargetValue)>>]
+    /\ UNCHANGED servers
+    /\ UNCHANGED responses
+    /\ UNCHANGED value
+    /\ clientPrimary' = primary
 
 ClientGiveup == 
     /\ clientPrimary # NullInt
+    (*We model one shot, if the client has succeeded, it will not restart.*)
+    /\ clientPrimary # 777
     /\ clientPrimary \notin servers[CLIENT]
     /\ UNCHANGED nextGUID
     /\ UNCHANGED crashed
@@ -222,24 +226,23 @@ Next ==
        /\ action' = "clientSucceed"
 
 
+(*It _should_ be possible to find counterexamples for these.*)
 Sanity0  == clientPrimary # 777
-Sanity1  == value[1] # 1
-Sanity2  == clientPrimary = NullInt
-Sanity4  == action # "fail"
-Sanity5  == action # "notifyFail"
-Sanity6  == action # "receiveResponse"
-Sanity7  == action # "receiveSync"
-Sanity8  == action # "primaryBeginUpdate"
-Sanity9  == action # "primaryCompleteUpdate"
-Sanity10 == action # "clientSend"
-Sanity11 == action # "clientGiveup"
-Sanity12 == action # "clientSucceed"
+Sanity1  == clientPrimary = NullInt
+Sanity2  == action # "fail"
+Sanity3  == action # "notifyFail"
+Sanity4  == action # "receiveResponse"
+Sanity5  == action # "receiveSync"
+Sanity6  == action # "primaryBeginUpdate"
+Sanity7  == action # "primaryCompleteUpdate"
+Sanity8  == action # "clientSend"
+Sanity9  == action # "clientGiveup"
+Sanity10 == action # "clientSucceed"
 
 Agreement ==
-    clientPrimary = 777 => (
-        \/ (\A p \in SERVERS \cup {CLIENT} : value[p] = 1)
-        \/ (\A p \in SERVERS \cup {CLIENT} : value[p] = 2)
-    )
+    clientPrimary = 777 => 
+        /\ \A p \in SERVERS: crashed[p] \/ value[p] = TargetValue
+        /\ value[CLIENT] = TargetValue
 
 Inv == Agreement
 
