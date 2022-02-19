@@ -124,3 +124,4 @@ _apalache-out/
 
 # TLC extras
 states/
+*_TTrace_*
