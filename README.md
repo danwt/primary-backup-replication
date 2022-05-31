@@ -1,6 +1,6 @@
 # primary-backup-replication
 
-TLA+ for primary backup replication.
+TLA+ for [primary backup replication](https://danwt.github.io/message_passing/2022/02/19/0.html).
 
 ```bash
 # Check
